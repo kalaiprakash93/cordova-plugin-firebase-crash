@@ -1,27 +1,39 @@
-const fs = require("fs");
-const xcode = require("xcode");
-const helper = require("./helper");
+const xcode = require('xcode')
+const path = require('path')
+const fs = require('fs')
 
-module.exports = function(context) {
-    const comment = helper.BUILD_PHASE_COMMENT;
-    const xcodeProjectPath = helper.getXcodeProjectPath(context);
-    const xcodeProject = xcode.project(xcodeProjectPath);
+// To run in node repl:
+// const f = require('./build/ios/addCrashlyticsBuildPhase')
+// f()
+module.exports = function (context) {
 
-    xcodeProject.parseSync();
+  const projectRoot = context ? context.opts.projectRoot : path.resolve(__dirname, '../../')
+  const projectDir = path.resolve(projectRoot, './platforms/ios')
+  const dirContent = fs.readdirSync(projectDir)
+  const matchingProjectFiles = dirContent.filter(filePath => /.*\.xcodeproj/gi.test(filePath) )
+  const projectPath = projectDir + '/' + matchingProjectFiles[0] + '/project.pbxproj'
 
-    // Only add if not already there yet
+  const project = xcode.project(projectPath)
 
-    const buildPhase = xcodeProject.pbxItemByComment(comment, "PBXShellScriptBuildPhase");
-
-    if (!buildPhase) {
-        const result = xcodeProject.addBuildPhase([], "PBXShellScriptBuildPhase", comment, null, {
-            shellPath: "/bin/sh",
-            shellScript: "\"${PODS_ROOT}/Fabric/run\"",
-            inputPaths: ["\"$(BUILT_PRODUCTS_DIR)/$(INFOPLIST_PATH)\""]
-        });
-
-        result.buildPhase.runOnlyForDeploymentPostprocessing = 1;
-
-        fs.writeFileSync(xcodeProjectPath, xcodeProject.writeSync());
+  project.parse(error => {
+    if (error) console.error('failed to parse project', error)
+    const options = {
+      shellPath: '/bin/sh',
+      shellScript: '${PODS_ROOT}/Fabric/run',
+      inputPaths: ['"$(BUILT_PRODUCTS_DIR)/$(INFOPLIST_PATH)"']
     }
-};
+    const comment = 'Initialize Crashlytics'
+    // Only add if not already there yet
+    const hasBuildPhase = !!project.getFirstTarget().firstTarget.buildPhases.find(buildPhase => buildPhase.comment === comment)
+
+    if (!hasBuildPhase) {
+      project.addBuildPhase(
+        [],
+        'PBXShellScriptBuildPhase',
+        comment,
+        project.getFirstTarget().uuid,
+        options)
+      fs.writeFileSync(projectPath, project.writeSync())
+    }
+  })
+}
